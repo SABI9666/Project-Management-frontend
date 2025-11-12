@@ -1860,135 +1860,257 @@ body.modal-open {
         const db = firebase.firestore();
 
         // ============================================
-        // API & AUTH CONFIGURATION
-        // ============================================
+// AWS API & AUTH CONFIGURATION
+// ============================================
 
-        // FIXED: Direct backend URL configuration
-        const API_BASE = 'https://eb-tracker-backend.onrender.com';
-        console.log('🔧 Backend URL configured:', API_BASE);
+// AWS API Gateway endpoint - UPDATE THIS WITH YOUR DEPLOYED URL
+const API_BASE = 'https://XXXXXXXXXX.execute-api.ap-south-1.amazonaws.com/production';
+console.log('🔧 AWS Backend URL configured:', API_BASE);
 
-        const authorizedUsers = {
-            estimator: ["estimator@edanbrook.com", "max@edanbrook.com"],
-            coo: ["coo@edanbrook.com", "coo2@edanbrook.com"],
-            director: ["director@edanbrook.com", "ajit@edanbrook.com"],
-            design_lead: ["designmanager@edanbrook.com"],
-            designer: [],
-            accounts: ["accounts@edanbrook.com", "finance@edanbrook.com"],
-            bdm: []
-        };
-        let currentUser = null;
-        let currentUserRole = '';
-        let authToken = '';
+const authorizedUsers = {
+    estimator: ["estimator@edanbrook.com", "max@edanbrook.com"],
+    coo: ["coo@edanbrook.com", "coo2@edanbrook.com"],
+    director: ["director@edanbrook.com", "ajit@edanbrook.com"],
+    design_lead: ["designmanager@edanbrook.com"],
+    designer: [],
+    accounts: ["accounts@edanbrook.com", "finance@edanbrook.com"],
+    bdm: []
+};
 
-        // ============================================
-        // CORE API & AUTH FUNCTIONS
-        // ============================================
+let currentUser = null;
+let currentUserRole = '';
+let authToken = '';
 
-        async function apiCall(endpoint, options = {}, retryCount = 0) {
-            const MAX_RETRIES = 2;
-            const RETRY_DELAY = 2000;
-            const url = `${API_BASE}/api/${endpoint}`;
+// API Configuration
+const API_CONFIG = {
+    BASE_URL: API_BASE,
+    TIMEOUT: 30000, // 30 seconds
+    MAX_RETRIES: 3,
+    RETRY_DELAY: 1000, // 1 second base delay
+    RETRY_STATUS_CODES: [502, 503, 504, 408] // AWS Gateway errors
+};
 
-            if (!authToken && currentUser && !endpoint.includes('health')) {
-                try {
-                    authToken = await currentUser.getIdToken(true);
-                    console.log('🔑 Token refreshed for API call');
-                } catch (error) {
-                    console.error('❌ Failed to refresh token:', error);
-                    throw new Error('Authentication token expired. Please log in again.');
-                }
-            }
+// ============================================
+// CORE API & AUTH FUNCTIONS
+// ============================================
 
-            const defaultHeaders = {};
-            if (authToken) {
-                defaultHeaders['Authorization'] = `Bearer ${authToken}`;
-            }
-            if (!(options.body instanceof FormData)) {
-                defaultHeaders['Content-Type'] = 'application/json';
-            }
+async function apiCall(endpoint, options = {}, retryCount = 0) {
+    const MAX_RETRIES = API_CONFIG.MAX_RETRIES;
+    const url = `${API_CONFIG.BASE_URL}/api/${endpoint}`;
 
-            const finalOptions = {
-                method: options.method || 'GET',
-                ...options,
-                headers: { ...defaultHeaders, ...(options.headers || {}) },
-                mode: 'cors',
-                credentials: 'omit' // FIXED: Don't send credentials with origin: '*'
-            };
-
-            try {
-                console.log(`📤 API Call [${finalOptions.method}]: ${url}`);
-                const response = await fetch(url, finalOptions);
-                console.log(`📥 Response: ${response.status} ${response.statusText}`);
-
-                const contentType = response.headers.get('content-type');
-                let responseData;
-
-                if (contentType && contentType.includes('application/json')) {
-                    const responseText = await response.text();
-                    try {
-                        responseData = responseText ? JSON.parse(responseText) : {};
-                    } catch (parseError) {
-                        console.error('❌ JSON parse error:', parseError);
-                        throw new Error(`Invalid JSON response: ${responseText.substring(0, 100)}`);
-                    }
-                } else {
-                    responseData = await response.text();
-                }
-
-                if (!response.ok) {
-                    if (response.status === 401) {
-                        console.error('❌ 401 Unauthorized - Token may be invalid');
-                        if (currentUser && retryCount === 0) {
-                            console.log('🔄 Attempting token refresh...');
-                            try {
-                                authToken = await currentUser.getIdToken(true);
-                                console.log('✅ Token refreshed, retrying request...');
-                                return await apiCall(endpoint, options, retryCount + 1);
-                            } catch (refreshError) {
-                                console.error('❌ Token refresh failed:', refreshError);
-                                await auth.signOut();
-                                throw new Error('Session expired. Please log in again.');
-                            }
-                        }
-                        throw new Error('Authentication failed. Please log in again.');
-                    }
-                    const errorMessage = responseData.message || responseData.error || `Request failed with status ${response.status}`;
-                    throw new Error(errorMessage);
-                }
-
-                console.log('✅ API call successful');
-                
-                // Handle different response formats
-                // If backend returns { success: true, data: {...} }, use it directly
-                // If backend returns data directly, wrap it
-                if (responseData && typeof responseData === 'object') {
-                    // If it has success/data structure, return as is
-                    if ('success' in responseData && 'data' in responseData) {
-                        return responseData;
-                    }
-                    // If it's raw data, wrap it
-                    return { success: true, data: responseData };
-                }
-                
-                // For non-object responses
-                return { success: true, data: responseData };
-
-            } catch (error) {
-                console.error(`❌ API call to ${endpoint} failed:`, error);
-                if ((error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) && retryCount < MAX_RETRIES) {
-                    console.warn(`⚠️  Network error, retrying...`);
-                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-                    return await apiCall(endpoint, options, retryCount + 1);
-                }
-                if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-                    throw new Error(
-                        `Cannot connect to backend at:\n${API_BASE}\n\n` +
-                        `Please check backend URL, CORS, and network.`
-                    );
-                }
-                throw error;
-            }
+    // Get fresh token if user is logged in
+    if (!authToken && currentUser && !endpoint.includes('health')) {
+        try {
+            authToken = await currentUser.getIdToken(true);
+            console.log('🔑 Token refreshed for API call');
+        } catch (error) {
+            console.error('❌ Failed to refresh token:', error);
+            throw new Error('Authentication token expired. Please log in again.');
         }
+    }
+
+    // Prepare headers
+    const defaultHeaders = {
+        'Accept': 'application/json'
+    };
+
+    if (authToken) {
+        defaultHeaders['Authorization'] = `Bearer ${authToken}`;
+    }
+
+    // Don't set Content-Type for FormData (browser will set it with boundary)
+    if (!(options.body instanceof FormData)) {
+        defaultHeaders['Content-Type'] = 'application/json';
+    }
+
+    const finalOptions = {
+        method: options.method || 'GET',
+        ...options,
+        headers: { ...defaultHeaders, ...(options.headers || {}) },
+        mode: 'cors',
+        credentials: 'omit' // AWS doesn't need credentials
+    };
+
+    // Add timeout using AbortController
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
+    finalOptions.signal = controller.signal;
+
+    try {
+        console.log(`📤 API Call [${finalOptions.method}]: ${url}`);
+        console.log(`   Retry attempt: ${retryCount}/${MAX_RETRIES}`);
+
+        const response = await fetch(url, finalOptions);
+        clearTimeout(timeoutId);
+        
+        console.log(`📥 Response: ${response.status} ${response.statusText}`);
+
+        // Parse response
+        const contentType = response.headers.get('content-type');
+        let responseData;
+
+        if (contentType && contentType.includes('application/json')) {
+            const responseText = await response.text();
+            try {
+                responseData = responseText ? JSON.parse(responseText) : {};
+            } catch (parseError) {
+                console.error('❌ JSON parse error:', parseError);
+                console.error('Response text:', responseText.substring(0, 200));
+                throw new Error(`Invalid JSON response from server`);
+            }
+        } else {
+            responseData = await response.text();
+            console.warn('⚠️ Non-JSON response received');
+        }
+
+        // Handle error responses
+        if (!response.ok) {
+            // Handle 401 Unauthorized - try token refresh
+            if (response.status === 401) {
+                console.error('❌ 401 Unauthorized - Token may be invalid');
+                
+                if (currentUser && retryCount === 0) {
+                    console.log('🔄 Attempting token refresh...');
+                    try {
+                        authToken = await currentUser.getIdToken(true);
+                        console.log('✅ Token refreshed, retrying request...');
+                        return await apiCall(endpoint, options, retryCount + 1);
+                    } catch (refreshError) {
+                        console.error('❌ Token refresh failed:', refreshError);
+                        await auth.signOut();
+                        throw new Error('Session expired. Please log in again.');
+                    }
+                }
+                throw new Error('Authentication failed. Please log in again.');
+            }
+
+            // Handle AWS Gateway errors with retry
+            if (API_CONFIG.RETRY_STATUS_CODES.includes(response.status) && retryCount < MAX_RETRIES) {
+                const delay = API_CONFIG.RETRY_DELAY * Math.pow(2, retryCount); // Exponential backoff
+                console.warn(`⚠️ AWS Gateway error ${response.status}, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return await apiCall(endpoint, options, retryCount + 1);
+            }
+
+            // Extract error message
+            const errorMessage = responseData.error || 
+                               responseData.message || 
+                               `Request failed with status ${response.status}`;
+            
+            console.error(`❌ API Error: ${errorMessage}`);
+            throw new Error(errorMessage);
+        }
+
+        console.log('✅ API call successful');
+        
+        // Handle AWS Lambda response format
+        // AWS typically returns: { success: true, data: {...} }
+        if (responseData && typeof responseData === 'object') {
+            // Check if it's an error response
+            if (responseData.success === false) {
+                throw new Error(responseData.error || responseData.message || 'API request failed');
+            }
+            
+            // If it has success/data structure, return as is
+            if ('success' in responseData) {
+                return responseData;
+            }
+            
+            // If it's raw data, wrap it
+            return { success: true, data: responseData };
+        }
+        
+        // For non-object responses (strings, etc.)
+        return { success: true, data: responseData };
+
+    } catch (error) {
+        clearTimeout(timeoutId);
+        console.error(`❌ API call to ${endpoint} failed:`, error);
+
+        // Handle timeout errors
+        if (error.name === 'AbortError') {
+            console.error('⏱️ Request timeout');
+            if (retryCount < MAX_RETRIES) {
+                const delay = API_CONFIG.RETRY_DELAY * Math.pow(2, retryCount);
+                console.warn(`⚠️ Timeout, retrying in ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return await apiCall(endpoint, options, retryCount + 1);
+            }
+            throw new Error('Request timeout. Please check your connection and try again.');
+        }
+
+        // Handle network errors with retry
+        if ((error.message.includes('Failed to fetch') || 
+             error.message.includes('NetworkError') ||
+             error.message.includes('network')) && 
+            retryCount < MAX_RETRIES) {
+            
+            const delay = API_CONFIG.RETRY_DELAY * Math.pow(2, retryCount);
+            console.warn(`⚠️ Network error, retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return await apiCall(endpoint, options, retryCount + 1);
+        }
+
+        // Final network error message
+        if (error.message.includes('Failed to fetch') || 
+            error.message.includes('NetworkError')) {
+            
+            const detailedError = 
+                `Cannot connect to AWS backend.\n\n` +
+                `Backend URL: ${API_CONFIG.BASE_URL}\n\n` +
+                `Possible issues:\n` +
+                `• Backend is not deployed\n` +
+                `• CORS is not configured correctly\n` +
+                `• API Gateway is unavailable\n` +
+                `• Network connectivity problem\n\n` +
+                `Check browser console for details.`;
+            
+            console.error('❌ ' + detailedError);
+            alert(detailedError);
+            throw new Error('Cannot connect to backend');
+        }
+
+        // Re-throw other errors
+        throw error;
+    }
+}
+
+// ============================================
+// BACKEND HEALTH CHECK
+// ============================================
+async function checkBackendHealth() {
+    try {
+        console.log('🔍 Checking AWS backend health...');
+        const response = await fetch(`${API_CONFIG.BASE_URL}/api/health`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' },
+            mode: 'cors'
+        });
+        
+        if (response.ok) {
+            console.log('✅ AWS Backend is healthy and reachable');
+            return true;
+        } else {
+            console.warn(`⚠️ Backend responded with status: ${response.status}`);
+            return false;
+        }
+    } catch (error) {
+        console.error('❌ Backend health check failed:', error);
+        console.error(`   Backend URL: ${API_CONFIG.BASE_URL}`);
+        return false;
+    }
+}
+
+// Test backend connection on page load
+window.addEventListener('load', async () => {
+    setTimeout(async () => {
+        const isHealthy = await checkBackendHealth();
+        if (!isHealthy) {
+            console.warn('⚠️ WARNING: Cannot reach AWS backend. Some features may not work.');
+            console.warn(`   Expected backend URL: ${API_CONFIG.BASE_URL}`);
+        }
+    }, 1000); // Wait 1 second after page load
+});
 
         document.addEventListener('DOMContentLoaded', () => {
             console.log('🚀 Application starting...');
