@@ -170,6 +170,41 @@ body.modal-open {
     border-color: #667eea; 
 }
 
+.password-requirements {
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    background: #f0f4f8;
+    border-radius: 8px;
+    font-size: 0.875rem;
+}
+
+.password-requirements strong {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-dark);
+}
+
+.password-requirements ul {
+    margin: 0.5rem 0 0 1.5rem;
+    line-height: 1.8;
+    color: var(--text-dark);
+}
+
+.password-example {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: #dbeafe;
+    border-radius: 4px;
+    color: #1e40af;
+}
+
+.password-example code {
+    background: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+}
+
 .role-selector { 
     display: grid; 
     grid-template-columns: repeat(2, 1fr); 
@@ -501,7 +536,27 @@ body.modal-open {
                         </div>
                         <div class="form-group">
                             <label>Password</label>
-                            <input type="password" id="registerPassword" required placeholder="••••••••" minlength="6">
+                            <input 
+                                type="password" 
+                                id="registerPassword" 
+                                required 
+                                placeholder="Enter strong password"
+                                oninput="showPasswordStrength(this.value)"
+                            >
+                            <div id="passwordStrength" style="margin-top: 0.5rem; font-size: 0.875rem;"></div>
+                            <div class="password-requirements">
+                                <strong>Password Requirements:</strong>
+                                <ul>
+                                    <li>Minimum 8 characters</li>
+                                    <li>One uppercase letter (A-Z)</li>
+                                    <li>One lowercase letter (a-z)</li>
+                                    <li>One number (0-9)</li>
+                                    <li>One special character (!@#$%^&*)</li>
+                                </ul>
+                                <div class="password-example">
+                                    <strong>✓ Valid Example:</strong> <code>TestPass123!</code>
+                                </div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>Select Role</label>
@@ -552,11 +607,11 @@ body.modal-open {
 
     <script>
         // ============================================
-        // AWS API & AUTH CONFIGURATION
+        // AWS API & AUTH CONFIGURATION - FIXED
         // ============================================
 
-        // AWS API Gateway endpoint
-        const API_BASE = 'https://w7qzsempf3.execute-api.ap-south-1.amazonaws.com/production/';
+        // CRITICAL FIX: Removed trailing slash from API URL
+        const API_BASE = 'https://w7qzsempf3.execute-api.ap-south-1.amazonaws.com/production';
         console.log('🔧 AWS Backend URL configured:', API_BASE);
 
         // Current user state
@@ -572,6 +627,48 @@ body.modal-open {
             RETRY_DELAY: 1000,
             RETRY_STATUS_CODES: [502, 503, 504, 408]
         };
+
+        // ============================================
+        // PASSWORD VALIDATION - NEW
+        // ============================================
+        function validatePassword(password) {
+            const errors = [];
+            
+            if (password.length < 8) {
+                errors.push('at least 8 characters');
+            }
+            if (!/[A-Z]/.test(password)) {
+                errors.push('one uppercase letter (A-Z)');
+            }
+            if (!/[a-z]/.test(password)) {
+                errors.push('one lowercase letter (a-z)');
+            }
+            if (!/[0-9]/.test(password)) {
+                errors.push('one number (0-9)');
+            }
+            if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+                errors.push('one special character (!@#$%^&*)');
+            }
+            
+            return errors;
+        }
+
+        function showPasswordStrength(password) {
+            const strengthIndicator = document.getElementById('passwordStrength');
+            if (!strengthIndicator) return;
+            
+            if (!password) {
+                strengthIndicator.innerHTML = '';
+                return;
+            }
+            
+            const errors = validatePassword(password);
+            if (errors.length === 0) {
+                strengthIndicator.innerHTML = '<span style="color: #10b981; font-weight: 600;">✓ Strong password</span>';
+            } else {
+                strengthIndicator.innerHTML = `<span style="color: #ef4444;">✗ Password needs: ${errors.join(', ')}</span>`;
+            }
+        }
 
         // ============================================
         // CORE API FUNCTION
@@ -736,16 +833,21 @@ body.modal-open {
         }
 
         // ============================================
-        // AUTHENTICATION FUNCTIONS
+        // AUTHENTICATION FUNCTIONS - UPDATED
         // ============================================
         async function handleLogin(e) {
             e.preventDefault();
+            
+            const email = document.getElementById('loginEmail').value.toLowerCase().trim();
+            const password = document.getElementById('loginPassword').value;
+
+            if (!email || !password) {
+                return showMessage('Email and password are required', 'error');
+            }
+
             try {
                 clearMessages();
                 showMessage('Logging in...', 'info');
-                
-                const email = document.getElementById('loginEmail').value;
-                const password = document.getElementById('loginPassword').value;
                 
                 console.log('🔐 Attempting login for:', email);
                 
@@ -754,20 +856,15 @@ body.modal-open {
                     body: JSON.stringify({ email, password })
                 });
                 
-                if (response.success && response.data) {
+                if (response.success && response.token) {
                     console.log('✅ Login successful');
                     
                     // Store auth token
-                    authToken = response.data.token;
+                    authToken = response.token;
                     
                     // Store user info
-                    currentUser = {
-                        id: response.data.user.id,
-                        email: response.data.user.email,
-                        name: response.data.user.name,
-                        role: response.data.user.role
-                    };
-                    currentUserRole = response.data.user.role;
+                    currentUser = response.data;
+                    currentUserRole = response.data.role;
                     
                     // Store in localStorage for persistence
                     localStorage.setItem('authToken', authToken);
@@ -776,29 +873,55 @@ body.modal-open {
                     showMessage('Login successful!', 'success');
                     setTimeout(() => showApp(), 500);
                 } else {
-                    throw new Error(response.error || 'Login failed');
+                    throw new Error(response.error || response.message || 'Login failed');
                 }
             } catch (error) {
                 console.error('❌ Login error:', error);
-                showMessage('Login failed: ' + error.message, 'error');
+                let errorMessage = error.message;
+                
+                // Make error messages user-friendly
+                if (errorMessage.includes('Invalid credentials') || errorMessage.includes('incorrect')) {
+                    errorMessage = 'Invalid email or password. Please try again.';
+                } else if (errorMessage.includes('not found')) {
+                    errorMessage = 'No account found with this email. Please register first.';
+                } else if (errorMessage.includes('not active')) {
+                    errorMessage = 'Your account is not active. Please contact administrator.';
+                }
+                
+                showMessage(errorMessage, 'error');
             }
         }
 
         async function handleRegister(e) {
             e.preventDefault();
             
-            const name = document.getElementById('registerName').value;
-            const email = document.getElementById('registerEmail').value.toLowerCase();
+            const name = document.getElementById('registerName').value.trim();
+            const email = document.getElementById('registerEmail').value.toLowerCase().trim();
             const password = document.getElementById('registerPassword').value;
             const role = document.getElementById('selectedRole').value;
 
-            if (!role) {
-                return showMessage('Please select a role', 'error');
+            // Validation
+            if (!name || !email || !password || !role) {
+                return showMessage('All fields are required', 'error');
+            }
+
+            // Email validation
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(email)) {
+                return showMessage('Please enter a valid email address', 'error');
+            }
+
+            // Password validation - CHECK BEFORE SENDING TO BACKEND
+            const passwordErrors = validatePassword(password);
+            if (passwordErrors.length > 0) {
+                return showMessage(`Password must have: ${passwordErrors.join(', ')}`, 'error');
             }
 
             try {
                 clearMessages();
                 showMessage('Creating account...', 'info');
+                
+                console.log('📝 Attempting registration for:', email);
                 
                 const response = await apiCall('auth/register', {
                     method: 'POST',
@@ -806,14 +929,34 @@ body.modal-open {
                 });
                 
                 if (response.success) {
-                    showMessage('Account created successfully! Please log in.', 'success');
-                    setTimeout(() => showTab('login'), 1500);
+                    console.log('✅ Registration successful');
+                    showMessage('✅ Account created successfully! Please log in.', 'success');
+                    
+                    // Clear form
+                    document.getElementById('registerForm').reset();
+                    document.getElementById('selectedRole').value = '';
+                    document.querySelectorAll('.role-btn').forEach(btn => btn.classList.remove('active'));
+                    
+                    // Switch to login tab after 2 seconds
+                    setTimeout(() => {
+                        const loginTab = document.querySelector('.tab:first-child');
+                        loginTab.click();
+                    }, 2000);
                 } else {
-                    throw new Error(response.error || 'Registration failed');
+                    throw new Error(response.error || response.message || 'Registration failed');
                 }
             } catch (error) {
                 console.error('❌ Registration error:', error);
-                showMessage('Registration failed: ' + error.message, 'error');
+                let errorMessage = error.message;
+                
+                // Make error messages user-friendly
+                if (errorMessage.includes('already exists')) {
+                    errorMessage = '⚠️ An account with this email already exists. Please log in.';
+                } else if (!errorMessage.includes('Password')) {
+                    errorMessage = '❌ Registration failed: ' + errorMessage;
+                }
+                
+                showMessage(errorMessage, 'error');
             }
         }
 
