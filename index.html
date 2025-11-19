@@ -932,9 +932,12 @@ body.modal-open {
                     console.log('✅ Registration successful');
                     showMessage('✅ Account created successfully! Please log in.', 'success');
                     
-                    // Clear form
-                    document.getElementById('registerForm').reset();
+                    // ✅ FIXED: Clear form using individual input values instead of form.reset()
+                    document.getElementById('registerName').value = '';
+                    document.getElementById('registerEmail').value = '';
+                    document.getElementById('registerPassword').value = '';
                     document.getElementById('selectedRole').value = '';
+                    document.getElementById('passwordStrength').innerHTML = '';
                     document.querySelectorAll('.role-btn').forEach(btn => btn.classList.remove('active'));
                     
                     // Switch to login tab after 2 seconds
