@@ -2097,11 +2097,18 @@ body.modal-open {
 
         async function handleLogin(e) {
             e.preventDefault();
+            
+            const email = document.getElementById('loginEmail').value.toLowerCase().trim();
+            const password = document.getElementById('loginPassword').value;
+
+            if (!email || !password) {
+                return showMessage('Email and password are required', 'error');
+            }
+
             try {
                 clearMessages();
                 showMessage('Logging in...', 'info');
-                const email = document.getElementById('loginEmail').value.toLowerCase().trim();
-                const password = document.getElementById('loginPassword').value;
+                
                 console.log('🔐 Attempting AWS login for:', email);
                 
                 const response = await apiCall('auth/login', {
@@ -2109,24 +2116,44 @@ body.modal-open {
                     body: JSON.stringify({ email, password })
                 });
                 
-                if (response.success) {
-                    authToken = response.token;
-                    currentUser = response.user;
-                    currentUserRole = response.user.role;
+                console.log('Login response:', response);
+                
+                if (response.success && response.token) {
+                    console.log('✅ Login successful');
                     
+                    // Store auth token
+                    authToken = response.token;
+                    
+                    // Store user info - backend returns user data in response.data
+                    currentUser = response.data;
+                    currentUserRole = response.data.role;
+                    
+                    // Store in localStorage for persistence
                     localStorage.setItem('authToken', authToken);
                     localStorage.setItem('currentUser', JSON.stringify(currentUser));
                     
-                    console.log('✅ Login successful, user:', currentUser.email);
-                    console.log('User role:', currentUserRole);
+                    console.log('User:', currentUser.email || currentUser.name);
+                    console.log('Role:', currentUserRole);
                     
-                    showApp();
+                    showMessage('Login successful!', 'success');
+                    setTimeout(() => showApp(), 500);
                 } else {
-                    throw new Error(response.error || 'Login failed');
+                    throw new Error(response.error || response.message || 'Login failed');
                 }
             } catch (error) {
                 console.error('❌ Login error:', error);
-                showMessage('Login failed: ' + error.message, 'error');
+                let errorMessage = error.message;
+                
+                // Make error messages user-friendly
+                if (errorMessage.includes('Invalid credentials') || errorMessage.includes('incorrect')) {
+                    errorMessage = 'Invalid email or password. Please try again.';
+                } else if (errorMessage.includes('not found')) {
+                    errorMessage = 'No account found with this email. Please register first.';
+                } else if (errorMessage.includes('not active')) {
+                    errorMessage = 'Your account is not active. Please contact administrator.';
+                }
+                
+                showMessage(errorMessage, 'error');
             }
         }
 
