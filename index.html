@@ -2026,7 +2026,7 @@ body.modal-open {
             }
         }
 
-        document.addEventListener('DOMContentLoaded', () => {
+        async function initializeApp() {
             console.log('🚀 Application starting...');
             console.log('Backend URL:', API_BASE);
             setupEventListeners();
@@ -2065,6 +2065,10 @@ body.modal-open {
             
             console.log('No saved session, showing login');
             showLogin();
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeApp();
         });
 
         // Refresh token every 50 minutes
@@ -7859,8 +7863,36 @@ async function markProjectComplete(projectId) {
         // DIAGNOSTICS
         // ============================================
 
-        async function testBackendConnection() { /* ... (Unchanged) ... */ }
-        async function runDiagnostics() { /* ... (Unchanged) ... */ }
+        async function testBackendConnection() {
+            try {
+                console.log('🔍 Testing AWS backend connection...');
+                const response = await fetch(`${API_BASE}/api/health`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                    mode: 'cors'
+                });
+                
+                if (response.ok) {
+                    console.log('✅ AWS Backend is reachable');
+                    return true;
+                } else {
+                    console.warn(`⚠️ Backend responded with status: ${response.status}`);
+                    return false;
+                }
+            } catch (error) {
+                console.error('❌ Backend connection test failed:', error);
+                return false;
+            }
+        }
+        
+        async function runDiagnostics() {
+            console.log('🔧 Running diagnostics...');
+            const isConnected = await testBackendConnection();
+            console.log(`Backend Connected: ${isConnected ? '✅' : '❌'}`);
+            console.log(`Auth Token: ${authToken ? '✅ Present' : '❌ Missing'}`);
+            console.log(`Current User: ${currentUser ? '✅ ' + currentUser.email : '❌ Not logged in'}`);
+            console.log(`User Role: ${currentUserRole || 'Not set'}`);
+        }
 
 
         // ============================================
