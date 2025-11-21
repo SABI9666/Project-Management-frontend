@@ -1930,30 +1930,6 @@ body.modal-open {
             RETRY_DELAY: 1000,
             RETRY_STATUS_CODES: [502, 503, 504, 408]
         };
-    <script>
-        // ============================================
-        // AWS API & AUTH CONFIGURATION
-        // ============================================
-
-        // AWS Backend URL
-        const API_BASE = 'https://w7qzsempf3.execute-api.ap-south-1.amazonaws.com/production';
-        console.log('🔧 AWS Backend URL configured:', API_BASE);
-
-        // Current user state
-        let currentUser = null;
-        let currentUserRole = '';
-        let authToken = '';
-
-        // API Configuration
-        const API_CONFIG = {
-            BASE_URL: API_BASE,
-            TIMEOUT: 30000,
-            MAX_RETRIES: 3,
-            RETRY_DELAY: 1000,
-            RETRY_STATUS_CODES: [502, 503, 504, 408]
-        };
-
-        let authToken = '';
 
         // ============================================
         // CORE API & AUTH FUNCTIONS
@@ -1964,14 +1940,14 @@ body.modal-open {
             const RETRY_DELAY = 2000;
             const url = `${API_BASE}/api/${endpoint}`;
 
-            if (!authToken) { throw new Error("Not authenticated"); } catch (error) {
-                    console.error('❌ Failed to refresh token:', error);
-                    throw new Error('Authentication token expired. Please log in again.');
-                }
+            // Skip auth check for login/register endpoints
+            if (!authToken && !endpoint.includes('login') && !endpoint.includes('register') && !endpoint.includes('health')) {
+                console.warn('⚠️ No auth token available for:', endpoint);
+                // Don't throw error, let the backend handle it
             }
 
             const defaultHeaders = {};
-            if (authToken) {
+            if (authToken && !endpoint.includes('login') && !endpoint.includes('register')) {
                 defaultHeaders['Authorization'] = `Bearer ${authToken}`;
             }
             if (!(options.body instanceof FormData)) {
@@ -1983,7 +1959,7 @@ body.modal-open {
                 ...options,
                 headers: { ...defaultHeaders, ...(options.headers || {}) },
                 mode: 'cors',
-                credentials: 'omit' // FIXED: Don't send credentials with origin: '*'
+                credentials: 'omit'
             };
 
             try {
@@ -2009,23 +1985,13 @@ body.modal-open {
                 if (!response.ok) {
                     if (response.status === 401) {
                         console.error('❌ 401 Unauthorized - Token may be invalid');
-                        if (currentUser && retryCount === 0) {
-                            console.log('🔄 Attempting token refresh...');
-                            try {
-                                authToken = authToken;
-                                console.log('✅ Token refreshed, retrying request...');
-                                return await apiCall(endpoint, options, retryCount + 1);
-                            } catch (refreshError) {
-                                console.error('❌ Token refresh failed:', refreshError);
-                                authToken = '';
-                currentUser = null;
-                currentUserRole = '';
-                localStorage.removeItem('authToken');
-                localStorage.removeItem('currentUser');
-                                throw new Error('Session expired. Please log in again.');
-                            }
-                        }
-                        throw new Error('Authentication failed. Please log in again.');
+                        authToken = '';
+                        currentUser = null;
+                        currentUserRole = '';
+                        localStorage.removeItem('authToken');
+                        localStorage.removeItem('currentUser');
+                        showLogin();
+                        throw new Error('Session expired. Please log in again.');
                     }
                     const errorMessage = responseData.message || responseData.error || `Request failed with status ${response.status}`;
                     throw new Error(errorMessage);
@@ -2034,18 +2000,13 @@ body.modal-open {
                 console.log('✅ API call successful');
                 
                 // Handle different response formats
-                // If backend returns { success: true, data: {...} }, use it directly
-                // If backend returns data directly, wrap it
                 if (responseData && typeof responseData === 'object') {
-                    // If it has success/data structure, return as is
                     if ('success' in responseData && 'data' in responseData) {
                         return responseData;
                     }
-                    // If it's raw data, wrap it
                     return { success: true, data: responseData };
                 }
                 
-                // For non-object responses
                 return { success: true, data: responseData };
 
             } catch (error) {
